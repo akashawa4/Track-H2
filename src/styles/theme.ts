@@ -1,20 +1,20 @@
 export const theme = {
   colors: {
     background: {
-      primary: '#0D1B2A',
-      card: '#1B263B',
-      panel: '#222F43',
+      primary: '#F5F7FB',
+      card: '#FFFFFF',
+      panel: '#F0F4FF',
     },
     text: {
-      primary: '#E0E6ED',
-      secondary: '#AAB6C5',
+      primary: '#1F2933',
+      secondary: '#5C6B7A',
     },
-    border: '#2E3A4D',
+    border: '#D7DDE6',
     status: {
-      safe: '#2ECC71',
-      warning: '#F1C40F',
-      critical: '#E74C3C',
-      action: '#00A8E8',
+      safe: '#1ABC9C',
+      warning: '#F7B500',
+      critical: '#FF5C5C',
+      action: '#4F46E5',
     },
   },
   spacing: {

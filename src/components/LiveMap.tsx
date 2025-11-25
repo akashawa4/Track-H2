@@ -1,5 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
-import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  MapContainer,
+  TileLayer,
+  Polyline,
+  Polygon,
+  CircleMarker,
+  Circle,
+  useMap,
+} from 'react-leaflet';
+import L from 'leaflet';
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import { theme } from '../styles/theme';
 import { TruckData } from '../types';
 
@@ -7,165 +19,85 @@ interface LiveMapProps {
   truckData: TruckData | null;
 }
 
-// Track if setOptions has been called (module-level to prevent multiple calls)
-let optionsSet = false;
+// Configure default Leaflet marker assets (Vite does not resolve them automatically)
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+});
+
+const fallbackCenter = { lat: 40.7128, lng: -74.006 };
+
+const ChangeView = ({ center }: { center: { lat: number; lng: number } }) => {
+  const map = useMap();
+  useEffect(() => {
+    map.setView(center);
+  }, [center, map]);
+  return null;
+};
 
 export const LiveMap = ({ truckData }: LiveMapProps) => {
-  const mapRef = useRef<HTMLDivElement>(null);
-  const googleMapRef = useRef<google.maps.Map | null>(null);
-  const markerRef = useRef<google.maps.Marker | null>(null);
-  const actualRouteRef = useRef<google.maps.Polyline | null>(null);
-  const expectedRouteRef = useRef<google.maps.Polyline | null>(null);
-  const geofenceRef = useRef<google.maps.Polygon | null>(null);
-  const [mapLoaded, setMapLoaded] = useState(false);
-  const initRef = useRef(false);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [geoError, setGeoError] = useState<string | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [isTracking, setIsTracking] = useState(false);
+  const [watchId, setWatchId] = useState<number | null>(null);
 
-  useEffect(() => {
-    // Prevent double initialization in StrictMode
-    if (initRef.current) return;
-    initRef.current = true;
-
-    const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-
-    if (!apiKey) {
-      console.warn('Google Maps API key not found. Make sure VITE_GOOGLE_MAPS_API_KEY is set in your .env file and the dev server is restarted.');
-      console.log('Available env vars:', Object.keys(import.meta.env).filter(key => key.startsWith('VITE_')));
-      console.log('VITE_GOOGLE_MAPS_API_KEY value:', import.meta.env.VITE_GOOGLE_MAPS_API_KEY);
+  const requestUserLocation = useCallback(() => {
+    if (!navigator.geolocation) {
+      setGeoError('Geolocation is not supported in this browser.');
       return;
     }
 
-    console.log('Google Maps API key loaded successfully');
+    setLocating(true);
+    setGeoError(null);
 
-    // Set API options only once
-    if (!optionsSet) {
-      setOptions({
-        apiKey,
-        version: 'weekly',
-      });
-      optionsSet = true;
-    }
-
-    // Load the Maps library
-    importLibrary('maps').then(() => {
-      if (mapRef.current && !googleMapRef.current) {
-        const map = new google.maps.Map(mapRef.current, {
-          center: { lat: 40.7128, lng: -74.006 },
-          zoom: 12,
-          styles: [
-            {
-              featureType: 'all',
-              elementType: 'geometry',
-              stylers: [{ color: '#1B263B' }],
-            },
-            {
-              featureType: 'all',
-              elementType: 'labels.text.fill',
-              stylers: [{ color: '#AAB6C5' }],
-            },
-            {
-              featureType: 'water',
-              elementType: 'geometry',
-              stylers: [{ color: '#0D1B2A' }],
-            },
-          ],
-          disableDefaultUI: false,
-          zoomControl: true,
-          mapTypeControl: false,
-          streetViewControl: false,
+    const id = navigator.geolocation.watchPosition(
+      (position) => {
+        setUserLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
         });
-
-        googleMapRef.current = map;
-        setMapLoaded(true);
-      }
-    }).catch((error) => {
-      console.error('Error loading Google Maps:', error);
-    });
+        setLocating(false);
+        setIsTracking(true);
+      },
+      (error) => {
+        setGeoError(error.message || 'Unable to retrieve your location.');
+        setLocating(false);
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+    setWatchId(id);
   }, []);
 
   useEffect(() => {
-    if (!mapLoaded || !googleMapRef.current || !truckData) return;
-
-    const map = googleMapRef.current;
-    const { gps, status, route } = truckData;
-
-    const markerColor =
-      status === 'OK'
-        ? theme.colors.status.safe
-        : status === 'WARNING'
-        ? theme.colors.status.warning
-        : theme.colors.status.critical;
-
-    if (!markerRef.current) {
-      markerRef.current = new google.maps.Marker({
-        position: { lat: gps.lat, lng: gps.lng },
-        map,
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 12,
-          fillColor: markerColor,
-          fillOpacity: 1,
-          strokeColor: '#FFFFFF',
-          strokeWeight: 2,
-        },
-      });
-    } else {
-      markerRef.current.setPosition({ lat: gps.lat, lng: gps.lng });
-      markerRef.current.setIcon({
-        path: google.maps.SymbolPath.CIRCLE,
-        scale: 12,
-        fillColor: markerColor,
-        fillOpacity: 1,
-        strokeColor: '#FFFFFF',
-        strokeWeight: 2,
-      });
-    }
-
-    map.setCenter({ lat: gps.lat, lng: gps.lng });
-
-    if (route.actual && route.actual.length > 0) {
-      if (actualRouteRef.current) {
-        actualRouteRef.current.setMap(null);
+    return () => {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
       }
-      actualRouteRef.current = new google.maps.Polyline({
-        path: route.actual,
-        geodesic: true,
-        strokeColor: theme.colors.status.action,
-        strokeOpacity: 0.8,
-        strokeWeight: 3,
-        map,
-      });
-    }
+    };
+  }, [watchId]);
 
-    if (route.expected && route.expected.length > 0) {
-      if (expectedRouteRef.current) {
-        expectedRouteRef.current.setMap(null);
-      }
-      expectedRouteRef.current = new google.maps.Polyline({
-        path: route.expected,
-        geodesic: true,
-        strokeColor: theme.colors.text.secondary,
-        strokeOpacity: 0.5,
-        strokeWeight: 2,
-        strokePattern: [10, 5],
-        map,
-      });
-    }
+  useEffect(() => {
+    requestUserLocation();
+  }, [requestUserLocation]);
 
-    if (route.geofence && route.geofence.length > 0) {
-      if (geofenceRef.current) {
-        geofenceRef.current.setMap(null);
-      }
-      geofenceRef.current = new google.maps.Polygon({
-        paths: route.geofence,
-        strokeColor: theme.colors.status.warning,
-        strokeOpacity: 0.6,
-        strokeWeight: 2,
-        fillColor: theme.colors.status.warning,
-        fillOpacity: 0.1,
-        map,
-      });
-    }
-  }, [mapLoaded, truckData]);
+  const mapCenter = useMemo(() => {
+    if (userLocation) return userLocation;
+    if (truckData?.gps) return truckData.gps;
+    return fallbackCenter;
+  }, [truckData?.gps, userLocation]);
+
+  const markerColor =
+    truckData?.status === 'OK'
+      ? theme.colors.status.safe
+      : truckData?.status === 'WARNING'
+      ? theme.colors.status.warning
+      : theme.colors.status.critical;
+
+  const actualRoute = truckData?.route?.actual?.map((point) => [point.lat, point.lng]) || [];
+  const expectedRoute = truckData?.route?.expected?.map((point) => [point.lat, point.lng]) || [];
+  const geofence = truckData?.route?.geofence?.map((point) => [point.lat, point.lng]) || [];
 
   return (
     <div
@@ -175,15 +107,113 @@ export const LiveMap = ({ truckData }: LiveMapProps) => {
         backgroundColor: theme.colors.background.panel,
       }}
     >
-      <div ref={mapRef} className="w-full h-full" />
-      {!mapLoaded && (
+      <MapContainer
+        center={[mapCenter.lat, mapCenter.lng]}
+        zoom={13}
+        scrollWheelZoom
+        style={{ height: '100%', width: '100%' }}
+      >
+        <ChangeView center={mapCenter} />
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+
+        {truckData && (
+          <CircleMarker
+            center={[truckData.gps.lat, truckData.gps.lng]}
+            radius={10}
+            pathOptions={{
+              color: markerColor,
+              fillColor: markerColor,
+              fillOpacity: 0.9,
+            }}
+          />
+        )}
+
+        {actualRoute.length > 0 && (
+          <Polyline
+            positions={actualRoute as [number, number][]}
+            pathOptions={{
+              color: theme.colors.status.action,
+              weight: 3,
+            }}
+          />
+        )}
+
+        {expectedRoute.length > 0 && (
+          <Polyline
+            positions={expectedRoute as [number, number][]}
+            pathOptions={{
+              color: theme.colors.text.secondary,
+              weight: 2,
+              dashArray: '10, 6',
+            }}
+          />
+        )}
+
+        {geofence.length > 0 && (
+          <Polygon
+            positions={geofence as [number, number][]}
+            pathOptions={{
+              color: theme.colors.status.warning,
+              fillColor: theme.colors.status.warning,
+              fillOpacity: 0.1,
+            }}
+          />
+        )}
+
+        {userLocation && (
+          <>
+            <Circle
+              center={[userLocation.lat, userLocation.lng]}
+              radius={120}
+              pathOptions={{
+                color: theme.colors.status.safe,
+                fillColor: theme.colors.status.safe,
+                fillOpacity: 0.15,
+              }}
+            />
+            <CircleMarker
+              center={[userLocation.lat, userLocation.lng]}
+              radius={8}
+              pathOptions={{
+                color: theme.colors.status.safe,
+                fillColor: theme.colors.status.safe,
+                fillOpacity: 0.9,
+              }}
+            />
+          </>
+        )}
+      </MapContainer>
+
+      {(locating || geoError) && (
         <div
-          className="absolute inset-0 flex items-center justify-center"
-          style={{ color: theme.colors.text.secondary }}
+          className="absolute top-2 right-2 px-3 py-2 rounded-md text-sm"
+          style={{
+            backgroundColor: theme.colors.background.card,
+            color: geoError ? theme.colors.status.warning : theme.colors.text.secondary,
+            boxShadow: '0 2px 6px rgba(0,0,0,0.35)',
+          }}
         >
-          Loading map...
+          {geoError ? `Location error: ${geoError}` : 'Fetching your location...'}
         </div>
       )}
+      <button
+        type="button"
+        onClick={requestUserLocation}
+        disabled={locating}
+        className="absolute top-3 left-3 px-4 py-2 rounded-md text-sm font-semibold"
+        style={{
+          backgroundColor: theme.colors.status.action,
+          color: '#0b1326',
+          opacity: locating ? 0.7 : 1,
+          boxShadow: '0 4px 8px rgba(0,0,0,0.35)',
+          zIndex: 999,
+        }}
+      >
+        {isTracking ? 'Re-center to me' : locating ? 'Locating...' : 'Use my location'}
+      </button>
     </div>
   );
 };

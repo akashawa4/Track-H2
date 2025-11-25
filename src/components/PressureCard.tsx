@@ -21,9 +21,9 @@ export const PressureCard = ({ value, threshold, unit, history }: PressureCardPr
   };
 
   const chartData = history.slice(-20).map((val, idx) => ({ value: val, index: idx }));
-  
+
   // Ensure we always have at least one data point to prevent Recharts errors
-  const safeChartData = chartData.length > 0 ? chartData : [{ value: value, index: 0 }];
+  const safeChartData = chartData.length > 0 ? chartData : [{ value, index: 0 }];
 
   return (
     <SensorCard
@@ -34,18 +34,21 @@ export const PressureCard = ({ value, threshold, unit, history }: PressureCardPr
       status={getStatus()}
       subtitle={`Threshold: ${threshold} ${unit}`}
     >
-      <div style={{ width: '100%', height: '40px', marginTop: '8px', minHeight: '40px', minWidth: '200px', position: 'relative' }}>
-        <ResponsiveContainer width="100%" height="100%" minHeight={40} minWidth={200}>
-          <LineChart data={safeChartData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-            <Line
-              type="monotone"
-              dataKey="value"
-              stroke={theme.colors.status.action}
-              strokeWidth={2}
-              dot={false}
-            />
-          </LineChart>
-        </ResponsiveContainer>
+      <div style={{ width: '100%', marginTop: '8px', display: 'flex', justifyContent: 'center' }}>
+        <LineChart
+          width={220}
+          height={40}
+          data={safeChartData}
+          margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
+        >
+          <Line
+            type="monotone"
+            dataKey="value"
+            stroke={theme.colors.status.action}
+            strokeWidth={2}
+            dot={false}
+          />
+        </LineChart>
       </div>
     </SensorCard>
   );
